@@ -8,6 +8,8 @@ from nltk.tokenize import word_tokenize
 import operator
 from itertools import chain, tee
 import math
+from sys import getsizeof
+from guppy import hpy
 logger = logging.getLogger()
 logger.setLevel(20)
 
@@ -45,47 +47,49 @@ class Trie(object):
         return True
 
 class BOW(object):
-    def __init__(self):
+    def __init__(self, ngram):
         self.cache_uni = None
         self.cache_ngram = None
         self.map = None
-        self.ngram = None
+        self.ngram = ngram
 
-    def raw_count(self, text, maxmem=1500000000):
+    def raw_count(self, file, maxmem=1500000000):
         """
         batch
         """
-        logger.debug('Extracting features: raw_count')
-        text, text_copy = tee(text)
+        logger.info('Extracting features: raw_count')
         ## get dimensions
         nfeatures = len(self.map)
         # nrows = int(float(maxmem) / nfeatures / np.dtype(float).itemsize)
         nrows = 0
-        for _ in text:
+        fs = open(file, 'r')
+        for _ in fs:
             nrows += 1
         ## get features
-        # logger.info("estimated required memory {} bytes".format(nrows * nfeatures * np.dtype(float).itemsize))
+        fs = open(file, 'r')
         label = np.empty(nrows, dtype=np.int)
         cache, row_idx, col_idx = [], [0], []
-        for idx, line in enumerate(text_copy):
+        for idx, line in enumerate(fs):
             if idx%10000 == 0:
-                logger.debug('Finish {} lines, {}%'.format(idx, int(float(idx)/nrows*100)))
-            l, line = line
+                logger.debug('Finish {} samples, {}%'.format(idx, int(float(idx)/nrows*100)))
+            line = line.decode('utf-8').strip().split(',')
+            l = int(line[0])
+            line = line[1:]
             label[idx] = l
             foo = defaultdict(int)
             for sent in line:
-                # add all unigram
-                for w in sent:
+                ### add all unigram
+                for w in sent.split():
                     if w in self.map:
                         foo[self.map[w]] += 1
-                # add ngram frome long to short
-                # version 1
+                ### add ngram frome long to short
+                # version 1 (include substr)
                 for i in range(len(sent)-1):
                     for j in range(i+1, min(len(sent), i + self.ngram)):
                         w = ' '.join(sent[i:j + 1])
                         if w in self.map:
                             foo[self.map[w]] += 1
-                # # version 2
+                # # version 2 (don't include substr)
                 # i = 0
                 # while i < len(sent) - 1:
                 #     for j in range(min(len(sent), i + self.ngram) - 1, i, -1):
@@ -94,18 +98,21 @@ class BOW(object):
                 #             foo[self.map[w]] += 1
                 #             i = j
                 #     i += 1
-            foo = foo.items()
-            col_idx += [w[0] for w in foo]
-            cache += [w[1] for w in foo]
+            col_idx += foo.keys()
+            cache += foo.values()
             row_idx.append(len(cache))
         data = sps.csr_matrix((cache, col_idx, row_idx), shape=(nrows, nfeatures), dtype=np.int)
         return data, label
 
     @staticmethod
     def _prune(cache, thre):
-        for key in list(cache):
+        tbd = []
+        for key in cache.iterkeys():
             if cache[key] < thre:
-                del cache[key]
+                tbd.append(key)
+        for key in tbd:
+            del cache[key]
+        del tbd
 
     def prune(self, cache, thre, maxmem):
         firsttimmer = 1
@@ -116,34 +123,41 @@ class BOW(object):
             firsttimmer = 0
         return thre
 
-    def count(self, text, maxmem=10000000, dic=set(), min_count=10, per=10000):
+    def count(self, file, maxmem=(1000000, 10000000), dic=set(), min_count=10, per=3000):
+        fp = open(file, 'r')
         cache_ngram = defaultdict(int)
         cache_uni = defaultdict(int)
         total = [0] * self.ngram
         thre = [2] * 2
-        for idx, sent in enumerate(text):
+        # track memory usage
+        h = hpy()
+        for idx, line in enumerate(fp):
+            line = line.decode('utf-8').strip().split(',')[1:]
             if idx % per == 0:
-                logger.debug('Finish {} lines with {} unigrams and {} ngrams'.format(idx, len(cache_uni), len(cache_ngram)))
-            for w in sent:
-                cache_uni[w] += 1
-                total[0] += 1
-            i = 0
-            while i < len(sent):
-                for j in range(min(len(sent), i + self.ngram) - 1, i, -1):
-                    w = ' '.join(sent[i:j+1])
-                    cache_ngram[w] += 1
-                    total[j - i] += 1
-                    if w in dic:
-                        i = j
-                        break
-                i += 1
-            # prune
-            if len(cache_ngram) > maxmem:
-                thre[1] = self.prune(cache_ngram, thre[1], maxmem)
-            if len(cache_uni) > maxmem:
-                thre[0] = self.prune(cache_uni, thre[0], maxmem)
+                logger.debug('Finish {} lines with {} unigrams@{} and {} ngrams@{}'.format(idx, len(cache_uni), thre[0], len(cache_ngram), thre[1]))
+                # print h.heap()
+            for sent in line:
+                for w in sent.split():
+                    cache_uni[w] += 1
+                    total[0] += 1
+                i = 0
+                while i < len(sent):
+                    for j in range(min(len(sent), i + self.ngram) - 1, i, -1):
+                        w = ' '.join(sent[i:j+1])
+                        cache_ngram[w] += 1
+                        total[j - i] += 1
+                        if w in dic:
+                            i = j
+                            break
+                    i += 1
+                # prune
+                if len(cache_uni) > maxmem[0]:
+                    thre[0] = self.prune(cache_uni, thre[0], maxmem[0])
+                if len(cache_ngram) > maxmem[1]:
+                    thre[1] = self.prune(cache_ngram, thre[1], maxmem[1])
 
         # final prune:
+        self._prune(cache_uni, max(min_count, thre[0]))
         self._prune(cache_ngram, max(min_count, thre[1]))
         return cache_uni, cache_ngram, total
 
@@ -163,13 +177,9 @@ class BOW(object):
 
 
 class BOW_freq(BOW):
-    def __init__(self, ngram):
-        super(BOW_freq, self).__init__()
-        self.ngram = ngram
-
-    def get_ngram(self, text, topN, maxmem=10000000, mode='s'):
+    def get_ngram(self, file, topN, maxmem=(1000000, 10000000), mode='s'):
         logger.info('BOW_freq: get_ngrams')
-        cache_uni, cache_ngram, _ = self.count(text, maxmem=maxmem, min_count=10)
+        cache_uni, cache_ngram, _ = self.count(file, maxmem=maxmem, min_count=10)
         #
         if mode == 's':
             cache_uni, cache_ngram = self.bestN(cache_uni, cache_ngram, topN, mode='s')
@@ -183,18 +193,14 @@ class BOW_freq(BOW):
         self.cache_uni = cache_uni
         self.cache_ngram = cache_ngram
         if mode == 's':
-            logger.info('{} unigram features and {} ngram features'.format(len(cache_uni), len(cache_ngram)))
+            logger.info('BOW_freq is finished; {} unigram features and {} ngram features'.format(len(cache_uni), len(cache_ngram)))
         elif mode == 'j':
-            logger.info('{} unigram features and ngram features totally.'.format(len(self.map)))
+            logger.info('BOW_freq is finished; {} unigram features and ngram features totally.'.format(len(self.map)))
 
 class BOW_wpmi(BOW):
-    def __init__(self, ngram):
-        super(BOW, self).__init__()
-        self.ngram = ngram
-        self.cache_wpmi = None
-
     @staticmethod
     def get_dic(cache):
+        logger.info('BOW_wpmi: Generate Dictionary from current ngrams')
         dic = set()
         substr = Trie()
         for w, _ in cache:
@@ -204,47 +210,50 @@ class BOW_wpmi(BOW):
             w = w.split()
             for j in range(len(w) - 1):
                 substr.add(' '.join(w[j:]))
+        del substr
+        logger.info('BOW_wpmi: Dictionary size {}'.format(len(dic)))
         return dic
 
-    def get_ngram(self, text, topN, maxmem=10000000, niter=2, dic=set()):
+    def get_ngram(self, file, topN,
+                  maxmem=(1000000, 10000000), niter=2, dic=set()):
         logger.info('BOW_wpmi: get_ngrams')
-        text = tee(text, niter)
         for i in range(niter):
-            logger.info('Dictionary size {}'.format(len(dic)))
-            cache_uni, cache_ngram, total = self.count(text[i], maxmem=maxmem, dic=dic, min_count=10)
+            # get counts
+            cache_uni, cache_ngram, total = self.count(file, maxmem=maxmem, dic=dic, min_count=10)
             logtotal = [math.log(val) if val > 0 else None for val in total]
-            # caclulate wpmi
-            cache_wpmi = {}
+            # caclulate wpmi and store in cache_ngram
+            min_val = None
+            for val in cache_uni.itervalues():
+                if not min_val or min_val > val:
+                    min_val = val
             for key, val in cache_ngram.iteritems():
                 words = key.split()
                 l = len(words)
-                cache_wpmi[key] = val * (math.log(val) -
+                logwords = [math.log(cache_uni[w]) if w in cache_uni else math.log(min_val) for w in words]
+                cache_ngram[key] = val * (math.log(val) -
                                          logtotal[l - 1] -
-                                         sum(math.log(cache_uni[w]) for w in words) +
+                                         sum(logwords) +
                                          l * logtotal[0])
             # take best N
-            cache_uni, cache_wpmi = self.bestN(cache_uni, cache_wpmi, topN)
+            cache_uni, cache_ngram = self.bestN(cache_uni, cache_ngram, topN)
             if i == niter - 1:
                 break
             # get dic
-            dic = self.get_dic(cache_wpmi)
+            dic = self.get_dic(cache_ngram)
         # get ngram to index mapping
         self.map = {}
-        for idx, w in enumerate(chain(cache_uni, cache_wpmi)):
+        for idx, w in enumerate(chain(cache_uni, cache_ngram)):
             w = w[0]
             self.map[w] = idx
-        self.cache_uni = cache_uni
-        _, cache_ngram = self.bestN({}, cache_ngram, topN)
-        self.cache_ngram = cache_ngram
-        self.cache_wpmi = cache_wpmi
-        logger.info('{} unigram features and {} ngram features'.format(len(cache_uni), len(cache_wpmi)))
+        self.cache_uni, self.cache_ngram = cache_uni, cache_ngram
+        logger.info('BOW_wpmi is finished; {} unigram features and {} ngram features are learned'.format(len(cache_uni), len(cache_ngram)))
 
 
 
 if __name__ == '__main__':
     text = smartfile('/media/vincent/Data-adhoc/wiki_dumps/wiki_zh/zhwiki-article')
     obj = BOW_wpmi(5)
-    topN = 10000
+    topN = 1000000
     obj.get_ngram(text, topN, niter=1)
 
     with open('zhwiki-article-{}gram-freq-list'.format(5), 'w') as h:
