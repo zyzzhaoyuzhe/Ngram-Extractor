@@ -137,7 +137,8 @@ class BOW(object):
                 logger.debug('Finish {} lines with {} unigrams@{} and {} ngrams@{}'.format(idx, len(cache_uni), thre[0], len(cache_ngram), thre[1]))
                 # print h.heap()
             for sent in line:
-                for w in sent.split():
+                sent = sent.split()
+                for w in sent:
                     cache_uni[w] += 1
                     total[0] += 1
                 i = 0
@@ -155,7 +156,6 @@ class BOW(object):
                     thre[0] = self.prune(cache_uni, thre[0], maxmem[0])
                 if len(cache_ngram) > maxmem[1]:
                     thre[1] = self.prune(cache_ngram, thre[1], maxmem[1])
-
         # final prune:
         self._prune(cache_uni, max(min_count, thre[0]))
         self._prune(cache_ngram, max(min_count, thre[1]))
