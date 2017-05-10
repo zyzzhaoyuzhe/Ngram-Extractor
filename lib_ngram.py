@@ -4,6 +4,7 @@ logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=lo
 import numpy as np
 import scipy.sparse as sps
 from collections import defaultdict
+import cPickle as pickle
 from nltk.tokenize import word_tokenize
 import operator
 from itertools import chain, tee
@@ -78,8 +79,9 @@ class BOW(object):
             label[idx] = l
             foo = defaultdict(int)
             for sent in line:
+                sent = sent.split()
                 ### add all unigram
-                for w in sent.split():
+                for w in sent:
                     if w in self.map:
                         foo[self.map[w]] += 1
                 ### add ngram frome long to short
@@ -124,6 +126,15 @@ class BOW(object):
         return thre
 
     def count(self, file, maxmem=(1000000, 10000000), dic=set(), min_count=10, per=3000):
+        """
+        Count the frequency of unigram and ngram (up to self.ngram)
+        :param file:
+        :param maxmem: maximal memory usage
+        :param dic: a dictionary to purify the count
+        :param min_count:
+        :param per:
+        :return:
+        """
         fp = open(file, 'r')
         cache_ngram = defaultdict(int)
         cache_uni = defaultdict(int)
@@ -175,6 +186,19 @@ class BOW(object):
         elif mode == 'j':
             return sorted(cache_uni.items() + cache_ngram.items(), key=operator.itemgetter(1), reverse=True)[:topN]
 
+    def save(self, filename):
+        to_save = ['cache_uni', 'cache_ngram', 'map', 'ngram', 'cache_uni_wpmi']
+        dic = self.__dict__
+        tbs = {}
+        for key in to_save:
+            if key in dic:
+                tbs[key] = dic[key]
+        pickle.dump(tbs, open(filename, 'w'))
+
+    def load(self, filename):
+        tbd = pickle.load(open(filename, 'r'))
+        for key, val in tbd.iteritems():
+            self.__dict__[key] = val
 
 class BOW_freq(BOW):
     def get_ngram(self, file, topN, maxmem=(1000000, 10000000), mode='s'):
@@ -248,6 +272,28 @@ class BOW_wpmi(BOW):
         self.cache_uni, self.cache_ngram = cache_uni, cache_ngram
         logger.info('BOW_wpmi is finished; {} unigram features and {} ngram features are learned'.format(len(cache_uni), len(cache_ngram)))
 
+    def rank_unigram_wpmi(self, file, maxmem=(1000000, 10000000)):
+        # get counts
+        self.ngram = 2
+        cache_uni, cache_bi, total = self.count(file, maxmem=maxmem, min_count=10)
+        logtotal = [math.log(val) if val > 0 else None for val in total]
+        # get PMI for cache_bi
+        for key, val in cache_bi.iteritems():
+            words = key.split()
+            if all([w in cache_uni for w in words]):
+                cache_bi[key] = val * (math.log(val) -
+                              logtotal[1] -
+                              math.log(cache_uni[words[0]]) -
+                              math.log(cache_uni[words[1]]) +
+                              2 * logtotal[0])
+        #
+        cache_uni_wpmi = defaultdict(float)
+        for key, val in cache_bi.iteritems():
+            words = key.split()
+            if all([w in cache_uni for w in words]):
+                cache_uni_wpmi[words[0]] += val
+                cache_uni_wpmi[words[1]] += val
+        self.cache_uni, self.cache_uni_wpmi = cache_uni, cache_uni_wpmi
 
 
 if __name__ == '__main__':
