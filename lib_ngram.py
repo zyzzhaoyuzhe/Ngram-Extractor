@@ -142,7 +142,8 @@ class BOW(object):
         # track memory usage
         h = hpy()
         for idx, line in enumerate(fp):
-            line = line.decode('utf-8').strip().split(',')[1:]
+            line = line.decode('utf-8').strip().split(',')[1:]  # for Zhang's datasets
+            line = [line.decode('utf-8')]   # for wiki dumps
             if idx % per == 0:
                 logger.debug('Finish {} lines with {} unigrams@{} and {} ngrams@{}'.format(idx, len(cache_uni), thre[0], len(cache_ngram), thre[1]))
                 # print h.heap()
