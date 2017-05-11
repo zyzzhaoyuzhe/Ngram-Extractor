@@ -52,12 +52,29 @@ def benchmark(clf, X_train, y_train, X_test, y_test):
 print ' '
 print ' '
 
-job_queue = ['ag_news_csv', 'dbpedia_csv', 'yelp_review_polarity_csv', 'amazon_review_full_csv', 'yahoo_answers_csv', 'yelp_review_full_csv']
+job_queue = ['ag_news_csv', 'dbpedia_csv', 'yahoo_answers_csv',
+             'amazon_review_full_csv', 'amazon_review_polarity_csv',
+             'yelp_review_polarity_csv', 'yelp_review_full_csv']
 topN = [100000, 500000]
 maxmem = (500000, 10000000)
 
+# # Try classifier
+# def worker(dataset):
+#     logging.info('Dataset: {}'.format(dataset))
+#     folder = '/media/vincent/Data-adhoc/TextClassificationDatasets/'
+#     try:
+#         model = lib_ngram.BOW_wpmi(5)
+#         model.load(dataset + '_wpmi.p')
+#         X_train, y_train = model.raw_count(folder + dataset + '/train_parsed.csv')
+#         X_test, y_test = model.raw_count(folder + dataset + '/test_parsed.csv')
+#         # clf_descr, train_accu, test_accu, train_time = benchmark(LinearSVC(), X_train, y_train, X_test, y_test)
+#         clf_descr, train_accu, test_accu, train_time = benchmark(LinearSVC(loss='hinge', penalty='l1'), X_train, y_train, X_test, y_test)
+#         return dataset, clf_descr, train_accu, test_accu, train_time
+#     except:
+#         logging.info('{}----failed----'.format(dataset))
 
-def worker_loop(dataset):
+# Get Training test data
+def worker(dataset):
     logging.info('Dataset: {}'.format(dataset))
     folder = '/media/vincent/Data-adhoc/TextClassificationDatasets/'
     try:
@@ -65,14 +82,26 @@ def worker_loop(dataset):
         model.load(dataset + '_wpmi.p')
         X_train, y_train = model.raw_count(folder + dataset + '/train_parsed.csv')
         X_test, y_test = model.raw_count(folder + dataset + '/test_parsed.csv')
-        clf_descr, train_accu, test_accu, train_time = benchmark(LinearSVC(), X_train, y_train, X_test, y_test)
-        return dataset, train_accu, test_accu, train_time
+        tbs = (model.map, X_train, y_train, X_test, y_test)
+        pickle.dump(tbs, open(dataset + '_wpmi_data_' + str(len(model.map)/10000) + '.p', 'w'))
+
+        model = lib_ngram.BOW_freq(5)
+        model.load(dataset + '_freq.p')
+        X_train, y_train = model.raw_count(folder + dataset + '/train_parsed.csv')
+        X_test, y_test = model.raw_count(folder + dataset + '/test_parsed.csv')
+        tbs = (model.map, X_train, y_train, X_test, y_test)
+        pickle.dump(tbs, open(dataset + '_freq_data_' + str(len(model.map) / 10000) + '.p', 'w'))
     except:
         logging.info('{}----failed----'.format(dataset))
 
 
-dataset = job_queue[3]
-worker_loop(dataset)
+
+# worker(job_queue[0])
+
+multiprocessing.Pool(2).map(worker, job_queue)
+
+# dataset = job_queue[3]
+# worker(dataset)
 
     # jobs = []
     # nproc = 4

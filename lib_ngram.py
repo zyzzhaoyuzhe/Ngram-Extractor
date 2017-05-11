@@ -143,7 +143,7 @@ class BOW(object):
         h = hpy()
         for idx, line in enumerate(fp):
             line = line.decode('utf-8').strip().split(',')[1:]  # for Zhang's datasets
-            line = [line.decode('utf-8')]   # for wiki dumps
+            # line = [line.decode('utf-8')]   # for wiki dumps
             if idx % per == 0:
                 logger.debug('Finish {} lines with {} unigrams@{} and {} ngrams@{}'.format(idx, len(cache_uni), thre[0], len(cache_ngram), thre[1]))
                 # print h.heap()
@@ -296,14 +296,14 @@ class BOW_wpmi(BOW):
                               math.log(cache_uni[words[0]]) -
                               math.log(cache_uni[words[1]]) +
                               2 * logtotal[0])
-        #
+        # get new rank
         cache_uni_wpmi = defaultdict(float)
         for key, val in cache_bi.iteritems():
             words = key.split()
             if all([w in cache_uni for w in words]):
                 cache_uni_wpmi[words[0]] += val
                 cache_uni_wpmi[words[1]] += val
-        self.cache_uni, self.cache_uni_wpmi = cache_uni, cache_uni_wpmi
+        self.cache_uni, self.cache_ngram, self.cache_uni_wpmi = cache_uni, cache_bi, cache_uni_wpmi
 
 
 if __name__ == '__main__':
