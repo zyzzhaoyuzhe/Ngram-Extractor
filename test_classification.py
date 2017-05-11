@@ -84,6 +84,7 @@ def worker(dataset):
         X_test, y_test = model.raw_count(folder + dataset + '/test_parsed.csv')
         tbs = (model.map, X_train, y_train, X_test, y_test)
         pickle.dump(tbs, open(dataset + '_wpmi_data_' + str(len(model.map)/10000) + '.p', 'w'))
+        del tbs, X_train, y_train, X_test, y_test
 
         model = lib_ngram.BOW_freq(5)
         model.load(dataset + '_freq.p')
