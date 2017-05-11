@@ -237,6 +237,19 @@ class BOW_wpmi(BOW):
         logger.info('BOW_wpmi: Dictionary size {}'.format(len(dic)))
         return dic
 
+    def get_map(self, cache_uni, cache_ngram):
+        """
+        Get ngram to index map
+        :param cache_uni:
+        :param cache_ngram:
+        :return:
+        """
+        self.map = {}
+        for idx, w in enumerate(chain(cache_uni, cache_ngram)):
+            w = w[0]
+            self.map[w] = idx
+
+
     def get_ngram(self, file, topN,
                   maxmem=(1000000, 10000000), niter=2, dic=set()):
         logger.info('BOW_wpmi: get_ngrams')
@@ -264,10 +277,7 @@ class BOW_wpmi(BOW):
             # get dic
             dic = self.get_dic(cache_ngram)
         # get ngram to index mapping
-        self.map = {}
-        for idx, w in enumerate(chain(cache_uni, cache_ngram)):
-            w = w[0]
-            self.map[w] = idx
+        self.get_map(cache_uni, cache_ngram)
         self.cache_uni, self.cache_ngram = cache_uni, cache_ngram
         logger.info('BOW_wpmi is finished; {} unigram features and {} ngram features are learned'.format(len(cache_uni), len(cache_ngram)))
 
