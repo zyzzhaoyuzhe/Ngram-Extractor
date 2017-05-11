@@ -54,14 +54,13 @@ class BOW(object):
         self.map = None
         self.ngram = ngram
 
-    def raw_count(self, file, maxmem=1500000000):
+    def raw_count(self, file):
         """
         batch
         """
         logger.info('Extracting features: raw_count')
         ## get dimensions
         nfeatures = len(self.map)
-        # nrows = int(float(maxmem) / nfeatures / np.dtype(float).itemsize)
         nrows = 0
         fs = open(file, 'r')
         for _ in fs:

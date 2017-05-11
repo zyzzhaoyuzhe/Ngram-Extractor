@@ -48,58 +48,31 @@ def benchmark(clf, X_train, y_train, X_test, y_test):
     clf_descr = str(clf).split('(')[0]
     return clf_descr, train_accu, test_accu, train_time
 
-if __name__ == '__main__':
-    print ' '
-    print ' '
+# if __name__ == '__main__':
+print ' '
+print ' '
 
-    job_queue = ['ag_news_csv', 'dbpedia_csv', 'yelp_review_polarity_csv', 'amazon_review_full_csv', 'yahoo_answers_csv', 'yelp_review_full_csv']
-    topN = [100000, 500000]
-    maxmem = (500000, 10000000)
+job_queue = ['ag_news_csv', 'dbpedia_csv', 'yelp_review_polarity_csv', 'amazon_review_full_csv', 'yahoo_answers_csv', 'yelp_review_full_csv']
+topN = [100000, 500000]
+maxmem = (500000, 10000000)
 
-    def _worker(dataset, topN):
-        output = []
-        folder = '/media/vincent/Data-adhoc/TextClassificationDatasets/'
-        train_file = folder + dataset + '/train_parsed.csv'
-        test_file = folder + dataset + '/test_parsed.csv'
 
-        ### train data and test data (freq ngram)
-        logging.info('{}------Using freq ngram features------'.format(dataset))
-        feature_freq = lib_ngram.BOW_freq(5)
-        feature_freq.get_ngram(train_file, topN, mode='s')
-        X_train, y_train = feature_freq.raw_count(train_file)
-        X_test, y_test = feature_freq.raw_count(test_file)
-        # tfidf
-        X_train = tfidf.fit_transform(X_train)
-        X_test = tfidf.fit_transform(X_test)
-        # benchmark(MultinomialNB())
+def worker_loop(dataset):
+    logging.info('Dataset: {}'.format(dataset))
+    folder = '/media/vincent/Data-adhoc/TextClassificationDatasets/'
+    try:
+        model = lib_ngram.BOW_wpmi(5)
+        model.load(dataset + '_wpmi.p')
+        X_train, y_train = model.raw_count(folder + dataset + '/train_parsed.csv')
+        X_test, y_test = model.raw_count(folder + dataset + '/test_parsed.csv')
         clf_descr, train_accu, test_accu, train_time = benchmark(LinearSVC(), X_train, y_train, X_test, y_test)
-        output.append((dataset + 'freq', topN, clf_descr, train_accu, test_accu, train_time))
-        del feature_freq, X_train, X_test, y_train, y_test
+        return dataset, train_accu, test_accu, train_time
+    except:
+        logging.info('{}----failed----'.format(dataset))
 
-        ### train data and test data (wpmi ngram)
-        logging.info('{}------Using WPMI ngram features------'.format(dataset))
-        feature_wpmi = lib_ngram.BOW_wpmi(5)
-        feature_wpmi.get_ngram(train_file, topN)
-        X_train, y_train = feature_wpmi.raw_count(train_file)
-        X_test, y_test = feature_wpmi.raw_count(test_file)
-        # tfidf
-        X_train = tfidf.fit_transform(X_train)
-        X_test = tfidf.fit_transform(X_test)
-        # benchmark(MultinomialNB())
-        clf_descr, train_accu, test_accu, train_time = benchmark(LinearSVC(),X_train, y_train, X_test, y_test)
-        output.append((dataset + 'wpmi', topN, clf_descr, train_accu, test_accu, train_time))
-        return output
 
-    def worker_loop(inp):
-        dataset, topN = inp
-        logging.info('Dataset: {}'.format(dataset))
-        # try:
-        return _worker(dataset, topN)
-        # except:
-        #     logging.info('************ Fail ************* {}'.format(dataset))
-
-    dataset = job_queue[3]
-    worker_loop((dataset, topN))
+dataset = job_queue[3]
+worker_loop(dataset)
 
     # jobs = []
     # nproc = 4
