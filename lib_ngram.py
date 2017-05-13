@@ -142,8 +142,8 @@ class BOW(object):
         # track memory usage
         h = hpy()
         for idx, line in enumerate(fp):
-            line = line.decode('utf-8').strip().split(',')[1:]  # for Zhang's datasets
-            # line = [line.decode('utf-8')]   # for wiki dumps
+            # line = line.decode('utf-8').strip().split(',')[1:]  # for Zhang's datasets
+            line = [line.decode('utf-8')]   # for wiki dumps
             if idx % per == 0:
                 logger.debug('Finish {} lines with {} unigrams@{} and {} ngrams@{}'.format(idx, len(cache_uni), thre[0], len(cache_ngram), thre[1]))
                 # print h.heap()
@@ -187,7 +187,7 @@ class BOW(object):
             return sorted(cache_uni.items() + cache_ngram.items(), key=operator.itemgetter(1), reverse=True)[:topN]
 
     def save(self, filename):
-        to_save = ['cache_uni', 'cache_ngram', 'map', 'ngram', 'cache_uni_wpmi']
+        to_save = ['cache_uni', 'cache_ngram', 'map', 'ngram', 'cache_uni_wpmi', 'total']
         dic = self.__dict__
         tbs = {}
         for key in to_save:
@@ -286,24 +286,33 @@ class BOW_wpmi(BOW):
         # get counts
         self.ngram = 2
         cache_uni, cache_bi, total = self.count(file, maxmem=maxmem, min_count=10)
-        logtotal = [math.log(val) if val > 0 else None for val in total]
-        # get PMI for cache_bi
-        for key, val in cache_bi.iteritems():
-            words = key.split()
-            if all([w in cache_uni for w in words]):
-                cache_bi[key] = val * (math.log(val) -
-                              logtotal[1] -
-                              math.log(cache_uni[words[0]]) -
-                              math.log(cache_uni[words[1]]) +
-                              2 * logtotal[0])
-        # get new rank
-        cache_uni_wpmi = defaultdict(float)
-        for key, val in cache_bi.iteritems():
-            words = key.split()
-            if all([w in cache_uni for w in words]):
-                cache_uni_wpmi[words[0]] += val
-                cache_uni_wpmi[words[1]] += val
-        self.cache_uni, self.cache_ngram, self.cache_uni_wpmi = cache_uni, cache_bi, cache_uni_wpmi
+        # logtotal = [math.log(val) if val > 0 else None for val in total]
+        # # get PMI for cache_bi
+        # for key, val in cache_bi.iteritems():
+        #     words = key.split()
+        #     if all([w in cache_uni for w in words]):
+        #         # weighted pmi
+        #         # cache_bi[key] = val * (math.log(val) -
+        #         #               logtotal[1] -
+        #         #               math.log(cache_uni[words[0]]) -
+        #         #               math.log(cache_uni[words[1]]) +
+        #         #               2 * logtotal[0])
+        #         # PMI
+        #         v = (math.log(val) -
+        #              logtotal[1] -
+        #              math.log(cache_uni[words[0]]) -
+        #              math.log(cache_uni[words[1]]) +
+        #              2 * logtotal[0])
+        #         cache_bi[key] = v
+        # # get new rank
+        # cache_uni_wpmi = defaultdict(float)
+        # for key, val in cache_bi.iteritems():
+        #     words = key.split()
+        #     if all([w in cache_uni for w in words]):
+        #         cache_uni_wpmi[words[0]] += val
+        #         cache_uni_wpmi[words[1]] += val
+        self.cache_uni, self.cache_ngram = cache_uni, cache_bi
+        self.total = total
 
 
 if __name__ == '__main__':
