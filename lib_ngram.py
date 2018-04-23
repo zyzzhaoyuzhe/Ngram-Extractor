@@ -1,34 +1,40 @@
 import logging
+
 logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
 logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.DEBUG)
 import numpy as np
 import scipy.sparse as sps
 from collections import defaultdict, deque
-import cPickle as pickle
+import pickle
 from nltk.tokenize import word_tokenize
 import operator
 from itertools import chain, tee
 import math
+from copy import deepcopy
 from sys import getsizeof
-from guppy import hpy
+
+# from guppy import hpy
 logger = logging.getLogger()
 logger.setLevel(20)
+
 
 class smartfile(object):
     def __init__(self, filename):
         self.fin = open(filename, 'r')
-        self.unicode = unicode
+        # self.unicode = unicode
+
     def __iter__(self):
         self.fin.seek(0)
         for line in self.fin:
-            yield line.decode('utf-8').split()
+            yield line.split()
+
 
 class Trie(object):
     def __init__(self):
         self.root = {}
 
     def add(self, word):
-        if not isinstance(word, basestring):
+        if not isinstance(word, str):
             return
         word = word.split()
         node = self.root
@@ -47,68 +53,69 @@ class Trie(object):
                 return False
         return True
 
+
 class BOW(object):
     def __init__(self, ngram):
-        self.cache_uni = None
-        self.cache_ngram = None
-        self.map = None
-        self.ngram = ngram
+        self._counts_ngrams = None  # list of dictionaries (ngram, freq)
+        self.score_ngrams = None    # list of dictionaries (ngram, score)
+        self.map = None             # dictionary (ngram, index)
+        self.ngram = ngram          # int
 
-    def raw_count(self, file):
-        """
-        batch
-        """
-        logger.info('Extracting features: raw_count')
-        ## get dimensions
-        nfeatures = len(self.map)
-        nrows = 0
-        fs = open(file, 'r')
-        for _ in fs:
-            nrows += 1
-        ## get features
-        fs = open(file, 'r')
-        label = np.empty(nrows, dtype=np.int)
-        cache, row_idx, col_idx = [], [0], []
-        for idx, line in enumerate(fs):
-            if idx%10000 == 0:
-                logger.debug('Finish {} samples, {}%'.format(idx, int(float(idx)/nrows*100)))
-            line = line.decode('utf-8').strip().split(',')
-            l = int(line[0])
-            line = line[1:]
-            label[idx] = l
-            foo = defaultdict(int)
-            for sent in line:
-                sent = sent.split()
-                ### add all unigram
-                for w in sent:
-                    if w in self.map:
-                        foo[self.map[w]] += 1
-                ### add ngram frome long to short
-                # version 1 (include substr)
-                for i in range(len(sent)-1):
-                    for j in range(i+1, min(len(sent), i + self.ngram)):
-                        w = ' '.join(sent[i:j + 1])
-                        if w in self.map:
-                            foo[self.map[w]] += 1
-                # # version 2 (don't include substr)
-                # i = 0
-                # while i < len(sent) - 1:
-                #     for j in range(min(len(sent), i + self.ngram) - 1, i, -1):
-                #         w = ' '.join(sent[i:j + 1])
-                #         if w in self.map:
-                #             foo[self.map[w]] += 1
-                #             i = j
-                #     i += 1
-            col_idx += foo.keys()
-            cache += foo.values()
-            row_idx.append(len(cache))
-        data = sps.csr_matrix((cache, col_idx, row_idx), shape=(nrows, nfeatures), dtype=np.int)
-        return data, label
+    # def raw_count(self, file):
+    #     """
+    #     batch
+    #     """
+    #     logger.info('Extracting features: raw_count')
+    #     ## get dimensions
+    #     nfeatures = len(self.map)
+    #     nrows = 0
+    #     fs = open(file, 'r')
+    #     for _ in fs:
+    #         nrows += 1
+    #     ## get features
+    #     fs = open(file, 'r')
+    #     label = np.empty(nrows, dtype=np.int)
+    #     cache, row_idx, col_idx = [], [0], []
+    #     for idx, line in enumerate(fs):
+    #         if idx % 10000 == 0:
+    #             logger.debug('Finish {} samples, {}%'.format(idx, int(float(idx) / nrows * 100)))
+    #         line = line.decode('utf-8').strip().split(',')
+    #         l = int(line[0])
+    #         line = line[1:]
+    #         label[idx] = l
+    #         foo = defaultdict(int)
+    #         for sent in line:
+    #             sent = sent.split()
+    #             ### add all unigram
+    #             for w in sent:
+    #                 if w in self.map:
+    #                     foo[self.map[w]] += 1
+    #             ### add ngram frome long to short
+    #             # version 1 (include substr)
+    #             for i in range(len(sent) - 1):
+    #                 for j in range(i + 1, min(len(sent), i + self.ngram)):
+    #                     w = ' '.join(sent[i:j + 1])
+    #                     if w in self.map:
+    #                         foo[self.map[w]] += 1
+    #             # # version 2 (don't include substr)
+    #             # i = 0
+    #             # while i < len(sent) - 1:
+    #             #     for j in range(min(len(sent), i + self.ngram) - 1, i, -1):
+    #             #         w = ' '.join(sent[i:j + 1])
+    #             #         if w in self.map:
+    #             #             foo[self.map[w]] += 1
+    #             #             i = j
+    #             #     i += 1
+    #         col_idx += foo.keys()
+    #         cache += foo.values()
+    #         row_idx.append(len(cache))
+    #     data = sps.csr_matrix((cache, col_idx, row_idx), shape=(nrows, nfeatures), dtype=np.int)
+    #     return data, label
 
     @staticmethod
     def _prune(cache, thre):
         tbd = []
-        for key in cache.iterkeys():
+        for key in cache.keys():
             if cache[key] < thre:
                 tbd.append(key)
         for key in tbd:
@@ -116,108 +123,68 @@ class BOW(object):
         del tbd
 
     def prune(self, cache, thre, maxmem):
-        firsttimmer = 1
         while len(cache) > 0.5 * maxmem:
-            if not firsttimmer:
-                thre += 1
             self._prune(cache, thre)
-            firsttimmer = 0
-        return thre
+            thre += 1
+        return thre - 1
 
-    def count(self, file, maxmem=(1000000, 10000000), dic=None, min_count=10, per=3000):
-        """
-        Count the frequency of unigram and ngram (up to self.ngram)
-        :param file:
-        :param maxmem: maximal memory usage
-        :param dic: contain key-value pairs as (ngram, wpmi)
-        :param min_count:
-        :param per:
-        :return:
-        """
-        fp = open(file, 'r')
-        cache_ngram = defaultdict(int)
-        cache_uni = defaultdict(int)
+    def count(self, file, maxmem, dic=None, min_count=10):
+        "Count the frequency of unigram and ngram (up to self.ngram)"
+        h = open(file, 'r') if isinstance(file, str) else file
+
+        cache_ngrams = [defaultdict(int) for _ in range(self.ngram)]
+        total_ngrams = [0] * self.ngram
+
         total = [0] * self.ngram
-        thre = [2] * 2
-        # track memory usage
-        h = hpy()
-        for idx, line in enumerate(fp):
-            line = line.decode('utf-8').strip().split(',')[1:]  # for Zhang's datasets
-            # line = [line.decode('utf-8')]   # for wiki dumps
-            if idx % per == 0:
-                logger.debug('Finish {} lines with {} unigrams@{} and {} ngrams@{}'.format(idx, len(cache_uni), thre[0], len(cache_ngram), thre[1]))
-                # print h.heap()
+        thres = [2] * self.ngram
+        for idx, line in enumerate(h):
+            # line = line.decode('utf-8').strip().split(',')[1:]  # for Zhang's datasets
+            line = [' '.join(line)]   # for wiki dumps
+            if idx % 3000 == 0:
+                logger.debug('Finish {} lines with {} n-grams and {} threshold'.format(idx, [len(cache) for cache in cache_ngrams], thres))
+
             for sent in line:
                 sent = sent.split()
                 len_sent = len(sent)
-                # calculate total
-                for i in range(self.ngram):
-                    total[i] += len_sent - i
-                # count a uni-gram
-                for w in sent:
-                    cache_uni[w] += 1
-                # count n-grams
-                if not dic:
-                    for i in xrange(len_sent - 1):
-                        for j in xrange(i+1, min(len_sent, i + self.ngram)):
-                            w = ' '.join(sent[i:j+1])
-                            cache_ngram[w] += 1
-                else:
-                    dp = [None] * (2 * len_sent - 1)
-                    for ng in xrange(self.ngram, 1, -1):
-                        for i in xrange(len_sent - ng +1):
-                            w = ' '.join(sent[i:i+ng])
-                            pos = ng - 1 + 2 * i
-                            if w in dic:
-                                dp[pos] = max((dic[w], dp[pos-1], dp[pos+1]))
-                                if dic[w] == dp[pos]:
-                                    cache_ngram[w] += 1
-                            else:
-                                dp[pos] = max((dp[pos-1], dp[pos+1]))
-                # # old count n-grams
-                # i = 0
-                # while i < len(sent):
-                #     for j in range(min(len(sent), i + self.ngram) - 1, i, -1):
-                #         w = ' '.join(sent[i:j+1])
-                #         cache_ngram[w] += 1
-                #         total[j - i] += 1
-                #         if w in dic:
-                #             i = j
-                #             break
-                #     i += 1
+
+                sent_ngrams = [[' '.join(sent[left:left+k+1]) for k in range(self.ngram) if left+k+1 < len_sent] for left in range(len_sent)]
+
+                for ngrams in sent_ngrams:
+                    if not dic:
+                        for k, w in enumerate(ngrams):
+                            total_ngrams[k] += 1
+                            cache_ngrams[k][w] += 1
+                    else:
+                        max_wpmi = None
+                        for k, w in enumerate(ngrams[::-1]):
+                            k = len(ngrams) - 1 - k
+                            if max_wpmi is None or dic[w] > max_wpmi:
+                                total_ngrams[k] += 1
+                                cache_ngrams[k][w] += 1
+                                max_wpmi = dic[w] if max_wpmi is None else max(max_wpmi, dic[w])
+
                 # prune
-                if len(cache_uni) > maxmem[0]:
-                    thre[0] = self.prune(cache_uni, thre[0], maxmem[0])
-                if len(cache_ngram) > maxmem[1]:
-                    thre[1] = self.prune(cache_ngram, thre[1], maxmem[1])
+                for k in range(self.ngram):
+                    if len(cache_ngrams[k]) > maxmem[k]:
+                        thres[k] = self.prune(cache_ngrams[k], thres[k], maxmem[k])
+
         # final prune:
-        self._prune(cache_uni, max(min_count, thre[0]))
-        self._prune(cache_ngram, max(min_count, thre[1]))
-        return cache_uni, cache_ngram, total
+        for k in range(self.ngram):
+            if len(cache_ngrams[k]) > maxmem[k]:
+                self._prune(cache_ngrams[k], thres[k], maxmem[k])
 
-    @staticmethod
-    def bestN(cache_uni, cache_ngram, topN, mode='s'):
-        if mode == 's':
-            if isinstance(topN, int):
-                cache_uni = sorted(cache_uni.items(), key=operator.itemgetter(1), reverse=True)[:topN]
-                cache_ngram = sorted(cache_ngram.items(), key=operator.itemgetter(1), reverse=True)[:topN]
-                return cache_uni, cache_ngram
-            else:
-                cache_uni = sorted(cache_uni.items(), key=operator.itemgetter(1), reverse=True)[:topN[0]]
-                cache_ngram = sorted(cache_ngram.items(), key=operator.itemgetter(1), reverse=True)[:topN[1]]
-                return cache_uni, cache_ngram
-        elif mode == 'j':
-            return sorted(cache_uni.items() + cache_ngram.items(), key=operator.itemgetter(1), reverse=True)[:topN]
+        self._counts_ngrams, self.total = cache_ngrams, total
 
-    def get_map(self, cache_uni, cache_ngram):
-        """
-        Get ngram to index map
-        :param cache_uni:
-        :param cache_ngram:
-        :return:
-        """
+    def top_ngrams(self, topN):
+        output = []
+        for k in range(self.ngram):
+            output.append(sorted(self.score_ngrams[k].items(), key=operator.itemgetter(1), reverse=True)[:topN[k]])
+        return output
+
+    def get_map(self):
+        "Get ngram to index map"
         self.map = {}
-        for idx, w in enumerate(chain(cache_uni, cache_ngram)):
+        for idx, w in enumerate(chain(self._counts_ngrams)):
             w = w[0]
             self.map[w] = idx
 
@@ -232,99 +199,46 @@ class BOW(object):
 
     def load(self, filename):
         tbd = pickle.load(open(filename, 'r'))
-        for key, val in tbd.iteritems():
+        for key, val in tbd.items():
             self.__dict__[key] = val
 
+
 class BOW_freq(BOW):
-    def get_ngram(self, file, topN, maxmem=(1000000, 10000000), mode='s'):
+    def fit(self, file, topN, maxmem):
         logger.info('BOW_freq: get_ngrams')
-        cache_uni, cache_ngram, _ = self.count(file, maxmem=maxmem, min_count=10)
-        #
-        if mode == 's':
-            cache_uni, cache_ngram = self.bestN(cache_uni, cache_ngram, topN, mode='s')
-            foo = chain(cache_uni, cache_ngram)
-        elif mode == 'j':
-            foo = self.bestN(cache_uni, cache_ngram, topN, mode='j')
-        self.get_map(foo, [])
-        self.cache_uni = cache_uni
-        self.cache_ngram = cache_ngram
-        if mode == 's':
-            logger.info('BOW_freq is finished; {} unigram features and {} ngram features'.format(len(cache_uni), len(cache_ngram)))
-        elif mode == 'j':
-            logger.info('BOW_freq is finished; {} unigram features and ngram features totally.'.format(len(self.map)))
+        self.count(file, maxmem)
+        self.score_ngrams = deepcopy(self._counts_ngrams)
+        self.score_ngrams = self.top_ngrams(topN)
+        # self.get_map()
+
 
 class BOW_wpmi(BOW):
-    # @staticmethod
-    # def get_dic(cache):
-    #     logger.info('BOW_wpmi: Generate Dictionary from current ngrams')
-    #     # dic = set()
-    #     # substr = Trie()
-    #     # for w, _ in cache:
-    #     #     if w in substr:
-    #     #         continue
-    #     #     dic.add(w)
-    #     #     w = w.split()
-    #     #     for j in range(len(w) - 1):
-    #     #         substr.add(' '.join(w[j:]))
-    #     # del substr
-    #     # logger.info('BOW_wpmi: Dictionary size {}'.format(len(dic)))
-    #     dic = {}
-    #     for key, val in cache:
-    #         dic[key] = val
-    #     return dic
 
-    @staticmethod
-    def _get_ngram(cache_uni, cache_ngram, total):
-        """ Calculate wpmi"""
-        logtotal = [math.log(val) if val > 0 else None for val in total]
-        log_min_val = math.log(min(cache_uni.itervalues()))
-        for key, val in cache_ngram.iteritems():
-            words = key.split()
-            l = len(words)
-            logwords = [math.log(cache_uni[w]) if w in cache_uni else log_min_val for w in words]
-            cache_ngram[key] = val * (math.log(val) -
-                                      logtotal[l - 1] -
-                                      sum(logwords) +
-                                      l * logtotal[0])
+    def _get_wpmi(self):
+        """ Calculate wpmi: p(w1,w2,..,wk) log(p(w1,w2,..,wk) / p(w1) p(w2) ... p(wk))"""
+        self.score_ngrams = [defaultdict(int) for _ in range(self.ngram)]
+
+        logtotal = np.log(self.total)
+
+        cache_uni = self._counts_ngrams[0]
+        for k in range(1, self.ngram):
+            for ngram, freq in self._counts_ngrams[k]:
+                words = ngram.split()
+                log_singleton = np.log([cache_uni[w] for w in words])
+                self.score_ngrams[k][ngram] = freq * (np.log(freq) - logtotal[k] - np.sum(log_singleton) + (k + 1) * logtotal[0])
+
+        self.score_ngrams[0] = deepcopy(self._counts_ngrams[0])
 
     def get_ngram(self, file, topN, maxmem=(1000000, 10000000), dic=set()):
         logger.info('BOW_wpmi: get_ngrams')
-        ## stage 1
-        cache_uni, cache_ngram, total = self.count(file, maxmem=maxmem, min_count=10)
+        # first scan
+        self.count(file, maxmem)
         # calculate wpmi
-        self._get_ngram(cache_uni,cache_ngram, total)
-        # stage 2
-        cache_uni, cache_ngram, total = self.count(file, maxmem=maxmem, min_count=10, dic=cache_ngram)
-        self._get_ngram(cache_uni, cache_ngram, total)
-        cache_uni, cache_ngram = self.bestN(cache_uni, cache_ngram, topN)
-        # ## old
-        # for i in range(niter):
-        #     # get counts
-        #     cache_uni, cache_ngram, total = self.count(file, maxmem=maxmem, dic=dic, min_count=10)
-        #     logtotal = [math.log(val) if val > 0 else None for val in total]
-        #     # caclulate wpmi and store in cache_ngram
-        #     min_val = None
-        #     for val in cache_uni.itervalues():
-        #         if not min_val or min_val > val:
-        #             min_val = val
-        #     for key, val in cache_ngram.iteritems():
-        #         words = key.split()
-        #         l = len(words)
-        #         logwords = [math.log(cache_uni[w]) if w in cache_uni else math.log(min_val) for w in words]
-        #         cache_ngram[key] = val * (math.log(val) -
-        #                                  logtotal[l - 1] -
-        #                                  sum(logwords) +
-        #                                  l * logtotal[0])
-        #     # take best N
-        #     cache_uni, cache_ngram = self.bestN(cache_uni, cache_ngram, topN)
-        #     if i == niter - 1:
-        #         break
-        #     # get dic
-        #     dic = self.get_dic(cache_ngram)
-        # get ngram to index mapping
-        self.get_map(cache_uni, cache_ngram)
-        self.cache_uni, self.cache_ngram = cache_uni, cache_ngram
-        logger.info('BOW_wpmi is finished; {} unigram features and {} ngram features are learned'.format(len(cache_uni), len(cache_ngram)))
+        self._get_wpmi()
+        # second scan
+        self.count(file, maxmem, dic=self.score_ngrams)
+        self._get_wpmi()
+        self.score_ngrams = self.top_ngrams(topN)
 
     def rank_unigram_wpmi(self, file, maxmem=(1000000, 10000000)):
         # get counts
@@ -332,7 +246,7 @@ class BOW_wpmi(BOW):
         cache_uni, cache_bi, total = self.count(file, maxmem=maxmem, min_count=10)
         # logtotal = [math.log(val) if val > 0 else None for val in total]
         # # get PMI for cache_bi
-        # for key, val in cache_bi.iteritems():
+        # for key, val in cache_bi.items():
         #     words = key.split()
         #     if all([w in cache_uni for w in words]):
         #         # weighted pmi
@@ -350,7 +264,7 @@ class BOW_wpmi(BOW):
         #         cache_bi[key] = v
         # # get new rank
         # cache_uni_wpmi = defaultdict(float)
-        # for key, val in cache_bi.iteritems():
+        # for key, val in cache_bi.items():
         #     words = key.split()
         #     if all([w in cache_uni for w in words]):
         #         cache_uni_wpmi[words[0]] += val
@@ -360,10 +274,17 @@ class BOW_wpmi(BOW):
 
 
 if __name__ == '__main__':
-    text = smartfile('/media/vincent/Data-adhoc/wiki_dumps/wiki_zh/zhwiki-article')
+    text = smartfile('/media/vzhao/Data/wiki_dumps/wiki_zh/zhwiki-article-tiny')
+
+    obj = BOW_freq(5)
+    topN = [1000000] * 5
+    maxmem = [1000000] * 5
+    obj.fit(text, topN, maxmem)
+
+
     obj = BOW_wpmi(5)
     topN = 1000000
-    obj.get_ngram(text, topN, niter=1)
+    obj.get_ngram(text, topN)
 
     with open('zhwiki-article-{}gram-freq-list'.format(5), 'w') as h:
         for idx, item in enumerate(obj.cache_ngram):
@@ -377,10 +298,3 @@ if __name__ == '__main__':
             h.write('{}\t{}\t{}\n'.format(idx,
                                           item[0].encode('utf-8'),
                                           math.log(item[1]) if item[1] > 0 else 0))
-
-
-
-
-
-
-
