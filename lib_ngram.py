@@ -3,20 +3,14 @@ import logging
 logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
 logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.DEBUG)
 import numpy as np
-import scipy.sparse as sps
-from collections import defaultdict, deque
+from collections import defaultdict
 import pickle
-from nltk.tokenize import word_tokenize
 import operator
-from itertools import chain, tee
-import math
+from itertools import chain
 from copy import deepcopy
-from sys import getsizeof
 
-# from guppy import hpy
 logger = logging.getLogger()
 logger.setLevel(20)
-
 
 class smartfile(object):
     def __init__(self, filename):
@@ -135,7 +129,6 @@ class BOW(object):
         cache_ngrams = [defaultdict(int) for _ in range(self.ngram)]
         total_ngrams = [0] * self.ngram
 
-        total = [0] * self.ngram
         thres = [2] * self.ngram
         for idx, line in enumerate(h):
             # line = line.decode('utf-8').strip().split(',')[1:]  # for Zhang's datasets
@@ -158,10 +151,10 @@ class BOW(object):
                         max_wpmi = None
                         for k, w in enumerate(ngrams[::-1]):
                             k = len(ngrams) - 1 - k
-                            if max_wpmi is None or dic[w] > max_wpmi:
+                            if max_wpmi is None or dic[k][w] > max_wpmi:
                                 total_ngrams[k] += 1
                                 cache_ngrams[k][w] += 1
-                                max_wpmi = dic[w] if max_wpmi is None else max(max_wpmi, dic[w])
+                                max_wpmi = dic[k][w] if max_wpmi is None else max(max_wpmi, dic[k][w])
 
                 # prune
                 for k in range(self.ngram):
@@ -173,7 +166,7 @@ class BOW(object):
             if len(cache_ngrams[k]) > maxmem[k]:
                 self._prune(cache_ngrams[k], thres[k], maxmem[k])
 
-        self._counts_ngrams, self.total = cache_ngrams, total
+        self._counts_ngrams, self.total = cache_ngrams, total_ngrams
 
     def top_ngrams(self, topN):
         output = []
@@ -204,12 +197,10 @@ class BOW(object):
 
 
 class BOW_freq(BOW):
-    def fit(self, file, topN, maxmem):
+    def fit(self, file, maxmem):
         logger.info('BOW_freq: get_ngrams')
         self.count(file, maxmem)
         self.score_ngrams = deepcopy(self._counts_ngrams)
-        self.score_ngrams = self.top_ngrams(topN)
-        # self.get_map()
 
 
 class BOW_wpmi(BOW):
@@ -222,14 +213,14 @@ class BOW_wpmi(BOW):
 
         cache_uni = self._counts_ngrams[0]
         for k in range(1, self.ngram):
-            for ngram, freq in self._counts_ngrams[k]:
+            for ngram, freq in self._counts_ngrams[k].items():
                 words = ngram.split()
-                log_singleton = np.log([cache_uni[w] for w in words])
+                log_singleton = np.log([max(cache_uni[w], freq) for w in words])
                 self.score_ngrams[k][ngram] = freq * (np.log(freq) - logtotal[k] - np.sum(log_singleton) + (k + 1) * logtotal[0])
 
         self.score_ngrams[0] = deepcopy(self._counts_ngrams[0])
 
-    def get_ngram(self, file, topN, maxmem=(1000000, 10000000), dic=set()):
+    def fit(self, file, maxmem):
         logger.info('BOW_wpmi: get_ngrams')
         # first scan
         self.count(file, maxmem)
@@ -238,63 +229,59 @@ class BOW_wpmi(BOW):
         # second scan
         self.count(file, maxmem, dic=self.score_ngrams)
         self._get_wpmi()
-        self.score_ngrams = self.top_ngrams(topN)
 
-    def rank_unigram_wpmi(self, file, maxmem=(1000000, 10000000)):
-        # get counts
-        self.ngram = 2
-        cache_uni, cache_bi, total = self.count(file, maxmem=maxmem, min_count=10)
-        # logtotal = [math.log(val) if val > 0 else None for val in total]
-        # # get PMI for cache_bi
-        # for key, val in cache_bi.items():
-        #     words = key.split()
-        #     if all([w in cache_uni for w in words]):
-        #         # weighted pmi
-        #         # cache_bi[key] = val * (math.log(val) -
-        #         #               logtotal[1] -
-        #         #               math.log(cache_uni[words[0]]) -
-        #         #               math.log(cache_uni[words[1]]) +
-        #         #               2 * logtotal[0])
-        #         # PMI
-        #         v = (math.log(val) -
-        #              logtotal[1] -
-        #              math.log(cache_uni[words[0]]) -
-        #              math.log(cache_uni[words[1]]) +
-        #              2 * logtotal[0])
-        #         cache_bi[key] = v
-        # # get new rank
-        # cache_uni_wpmi = defaultdict(float)
-        # for key, val in cache_bi.items():
-        #     words = key.split()
-        #     if all([w in cache_uni for w in words]):
-        #         cache_uni_wpmi[words[0]] += val
-        #         cache_uni_wpmi[words[1]] += val
-        self.cache_uni, self.cache_ngram = cache_uni, cache_bi
-        self.total = total
+    # def rank_unigram_wpmi(self, file, maxmem=(1000000, 10000000)):
+    #     # get counts
+    #     self.ngram = 2
+    #     cache_uni, cache_bi, total = self.count(file, maxmem=maxmem, min_count=10)
+    #     # logtotal = [math.log(val) if val > 0 else None for val in total]
+    #     # # get PMI for cache_bi
+    #     # for key, val in cache_bi.items():
+    #     #     words = key.split()
+    #     #     if all([w in cache_uni for w in words]):
+    #     #         # weighted pmi
+    #     #         # cache_bi[key] = val * (math.log(val) -
+    #     #         #               logtotal[1] -
+    #     #         #               math.log(cache_uni[words[0]]) -
+    #     #         #               math.log(cache_uni[words[1]]) +
+    #     #         #               2 * logtotal[0])
+    #     #         # PMI
+    #     #         v = (math.log(val) -
+    #     #              logtotal[1] -
+    #     #              math.log(cache_uni[words[0]]) -
+    #     #              math.log(cache_uni[words[1]]) +
+    #     #              2 * logtotal[0])
+    #     #         cache_bi[key] = v
+    #     # # get new rank
+    #     # cache_uni_wpmi = defaultdict(float)
+    #     # for key, val in cache_bi.items():
+    #     #     words = key.split()
+    #     #     if all([w in cache_uni for w in words]):
+    #     #         cache_uni_wpmi[words[0]] += val
+    #     #         cache_uni_wpmi[words[1]] += val
+    #     self.cache_uni, self.cache_ngram = cache_uni, cache_bi
+    #     self.total = total
 
 
 if __name__ == '__main__':
-    text = smartfile('/media/vzhao/Data/wiki_dumps/wiki_zh/zhwiki-article-tiny')
+    text = smartfile('zhwiki-article-tiny')
 
-    obj = BOW_freq(5)
     topN = [1000000] * 5
     maxmem = [1000000] * 5
-    obj.fit(text, topN, maxmem)
-
-
     obj = BOW_wpmi(5)
-    topN = 1000000
-    obj.get_ngram(text, topN)
+    obj.fit(text, maxmem)
+    print(obj.top_ngrams(topN)[2][:20])
 
-    with open('zhwiki-article-{}gram-freq-list'.format(5), 'w') as h:
-        for idx, item in enumerate(obj.cache_ngram):
-            h.write('{}\t{}\t{}\n'.format(idx, item[0].encode('utf-8'), item[1]))
 
-    dic = obj.get_dic(obj.cache_wpmi)
-    obj.get_ngram(text, topN, niter=1, dic=dic)
-
-    with open('zhwiki-article-{}gram-wpmi-list-iter{}'.format(5, 2), 'w') as h:
-        for idx, item in enumerate(obj.cache_wpmi):
-            h.write('{}\t{}\t{}\n'.format(idx,
-                                          item[0].encode('utf-8'),
-                                          math.log(item[1]) if item[1] > 0 else 0))
+    # with open('zhwiki-article-{}gram-freq-list'.format(5), 'w') as h:
+    #     for idx, item in enumerate(obj.cache_ngram):
+    #         h.write('{}\t{}\t{}\n'.format(idx, item[0].encode('utf-8'), item[1]))
+    #
+    # dic = obj.get_dic(obj.cache_wpmi)
+    # obj.fit(text, topN, niter=1, dic=dic)
+    #
+    # with open('zhwiki-article-{}gram-wpmi-list-iter{}'.format(5, 2), 'w') as h:
+    #     for idx, item in enumerate(obj.cache_wpmi):
+    #         h.write('{}\t{}\t{}\n'.format(idx,
+    #                                       item[0].encode('utf-8'),
+    #                                       math.log(item[1]) if item[1] > 0 else 0))
